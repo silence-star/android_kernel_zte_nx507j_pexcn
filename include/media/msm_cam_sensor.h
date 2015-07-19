@@ -52,12 +52,10 @@
 
 #define MAX_AF_ITERATIONS 3
 #define MAX_NUMBER_OF_STEPS 47
-#define MAX_POWER_CONFIG 12
 
-typedef enum sensor_stats_type {
-	YRGB,
-	YYYY,
-} sensor_stats_type_t;
+#if ((defined CONFIG_ZTE_CAMERA_DUAL_LED) || (defined ZTEMT_CAMERA_DUAL_LED))
+#define MAX_LED_TRIGGERS 3
+#endif
 
 enum flash_type {
 	LED_FLASH = 1,
@@ -126,6 +124,9 @@ enum msm_sensor_resolution_t {
 	MSM_SENSOR_RES_5,
 	MSM_SENSOR_RES_6,
 	MSM_SENSOR_RES_7,
+	MSM_SENSOR_RES_8,
+	MSM_SENSOR_RES_9,
+	MSM_SENSOR_RES_10,
 	MSM_SENSOR_INVALID_RES,
 };
 
@@ -484,6 +485,14 @@ enum msm_sensor_cfg_type_t {
 	CFG_SET_WHITE_BALANCE,
 	CFG_SET_AUTOFOCUS,
 	CFG_CANCEL_AUTOFOCUS,
+	CFG_SET_MANUAL_AF_ZTEMT,           //ZTEMT: Jinghongliang Add For Manual AF Mode
+	//	#ifdef CONFIG_ZTEMT_CAMERA_OIS     //ZTEMT CAMERA FOR OIS MENU ----START
+	CFG_ENABLE_OIS,
+	CFG_DISABLE_OIS,
+   //  #endif                             //ZTEMT CAMERA FOR OIS MENU ----END
+           // ZTEMT: peijun add for setBacklight -----start
+	CFG_SET_ZTE_BACKLIGHT,
+	// ZTEMT: peijun add for setBacklight -----end
 };
 
 enum msm_actuator_cfg_type_t {
@@ -492,8 +501,6 @@ enum msm_actuator_cfg_type_t {
 	CFG_SET_DEFAULT_FOCUS,
 	CFG_MOVE_FOCUS,
 	CFG_SET_POSITION,
-	CFG_ACTUATOR_POWERDOWN,
-	CFG_ACTUATOR_POWERUP,
 };
 
 enum actuator_type {
@@ -511,18 +518,9 @@ enum msm_actuator_addr_type {
 	MSM_ACTUATOR_WORD_ADDR,
 };
 
-enum msm_actuator_i2c_operation {
-	MSM_ACT_WRITE = 0,
-	MSM_ACT_POLL,
-};
-
 struct reg_settings_t {
 	uint16_t reg_addr;
-	enum msm_actuator_addr_type addr_type;
 	uint16_t reg_data;
-	enum msm_actuator_data_type data_type;
-	enum msm_actuator_i2c_operation i2c_operation;
-	uint32_t delay;
 };
 
 struct region_params_t {
@@ -595,6 +593,12 @@ enum af_camera_name {
 	ACTUATOR_MAIN_CAM_3,
 	ACTUATOR_MAIN_CAM_4,
 	ACTUATOR_MAIN_CAM_5,
+	ACTUATOR_MAIN_CAM_6,
+	ACTUATOR_MAIN_CAM_7,
+	ACTUATOR_MAIN_CAM_8,
+	ACTUATOR_MAIN_CAM_9,
+	ACTUATOR_MAIN_CAM_10,
+	ACTUATOR_MAIN_CAM_11,
 	ACTUATOR_WEB_CAM_0,
 	ACTUATOR_WEB_CAM_1,
 	ACTUATOR_WEB_CAM_2,
@@ -643,7 +647,11 @@ enum msm_camera_led_config_t {
 struct msm_camera_led_cfg_t {
 	enum msm_camera_led_config_t cfgtype;
 	uint32_t torch_current;
-	uint32_t flash_current[2];
+	#if ((defined CONFIG_ZTE_CAMERA_DUAL_LED) || (defined ZTEMT_CAMERA_DUAL_LED))
+	uint32_t flash_current[MAX_LED_TRIGGERS];
+	#else
+    uint32_t flash_current[2];
+    #endif
 };
 
 /* sensor init structures and enums */
@@ -670,10 +678,10 @@ struct sensor_init_cfg_data {
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 3, uint32_t)
 
 #define VIDIOC_MSM_CSIPHY_IO_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct csiphy_cfg_data)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct csid_cfg_data)
 
 #define VIDIOC_MSM_CSID_IO_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct csid_cfg_data)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct csiphy_cfg_data)
 
 #define VIDIOC_MSM_ACTUATOR_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 6, struct msm_actuator_cfg_data)

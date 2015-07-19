@@ -54,7 +54,17 @@ struct msm_sensor_fn_t {
 struct msm_sensor_ctrl_t {
 	struct platform_device *pdev;
 	struct mutex *msm_sensor_mutex;
-
+	//added by congshan start
+	struct delayed_work zte_otp_worker;
+	int (*zte_adaptive_sensor)(struct msm_sensor_ctrl_t*);
+	void (*zte_read_otp)(struct msm_sensor_ctrl_t*);
+	void (*zte_workquene_init)(struct msm_sensor_ctrl_t*);	
+	void (*zte_workquene_schedule)(struct msm_sensor_ctrl_t*);
+	void (*zte_workquene_cancel)(struct msm_sensor_ctrl_t*);
+	void (*zte_power_down)(struct msm_sensor_ctrl_t*);
+	void (*zte_control_ois)(struct msm_sensor_ctrl_t*, int);
+	struct mutex zte_otp_mutex;
+	//added by congshan end
 	enum msm_camera_device_type_t sensor_device_type;
 	struct msm_camera_sensor_board_info *sensordata;
 	struct msm_sensor_power_setting_array power_setting_array;

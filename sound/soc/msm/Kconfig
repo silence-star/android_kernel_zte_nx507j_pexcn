@@ -4,6 +4,15 @@ menu "MSM SoC Audio support"
 config SND_MSM_DAI_SOC
 	tristate
 
+config ZTEMT_AUDIO_EXT_AMP
+       tristate "ZTEMT_AUDIO_EXT_AMP"
+
+config ZTEMT_AUDIO_HEADSET_SW
+       tristate "ZTEMT_AUDIO_EXT_AMP"
+
+config ZTEMT_AUDIO_MBHC_OPEN
+       tristate "ZTEMT_AUDIO_EXT_AMP"
+
 config SND_MSM_SOC_MSM7K
 	 tristate
 
@@ -179,7 +188,8 @@ config SND_SOC_MSM8974
 	select SND_SOC_QDSP6V2
 	select SND_SOC_MSM_STUB
 	select SND_SOC_MSM_HOSTLESS_PCM
-	select SND_SOC_WCD9320
+	select SND_SOC_AK4961  if AK4961_CODEC
+	select SND_SOC_WCD9320 if WCD9320_CODEC
 	select SND_DYNAMIC_MINORS
 	select AUDIO_OCMEM
 	select DOLBY_DAP

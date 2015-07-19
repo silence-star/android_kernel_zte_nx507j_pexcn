@@ -1137,7 +1137,7 @@ config MACH_FSM9XXX_SURF
 	  Support for the Qualcomm FSM9xxx femtocell
 	  chipset based SURF evaluation board and
 	  FFA board.
-
+source "arch/arm/mach-msm/board/Kconfig"
 endmenu
 
 config MSM_STACKED_MEMORY

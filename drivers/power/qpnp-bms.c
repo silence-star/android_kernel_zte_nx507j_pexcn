@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -95,6 +95,26 @@
 
 #define QPNP_BMS_DEV_NAME "qcom,qpnp-bms"
 
+//#define CONFIG_ZTEMT_COMM_CHARGE_X
+
+
+#ifdef CONFIG_ZTEMT_COMM_CHARGE_X
+//打开调试接口
+ #undef pr_debug
+ #define pr_debug   pr_info
+
+#undef KERN_INFO
+#define KERN_INFO KERN_ERR
+#endif
+
+#ifdef CONFIG_ZTEMT_COMM_CHARGE
+static int debug_mask_bms = 1;
+module_param_named(debug_mask_bms, debug_mask_bms, int, S_IRUGO | S_IWUSR | S_IWGRP);
+#define DBG_BMS(x...) do {if (debug_mask_bms) pr_info(">>ZTEMT_BMS>>  " x); } while (0)
+#endif
+
+#define ZTEMT_BMS_DEBUG 1
+
 enum {
 	SHDW_CC,
 	CC
@@ -130,7 +150,9 @@ struct fcc_sample {
 struct bms_irq {
 	unsigned int	irq;
 	unsigned long	disabled;
+	unsigned long	wake_enabled;
 	bool		ready;
+	bool 	is_wake;
 };
 
 struct bms_wakeup_source {
@@ -287,6 +309,9 @@ struct qpnp_bms_chip {
 	struct qpnp_vadc_chip		*vadc_dev;
 	struct qpnp_iadc_chip		*iadc_dev;
 	struct qpnp_adc_tm_chip		*adc_tm_dev;
+	#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+	int calc_origin_soc;
+	#endif
 };
 
 static struct of_device_id qpnp_bms_match_table[] = {
@@ -314,6 +339,10 @@ static int discard_backup_fcc_data(struct qpnp_bms_chip *chip);
 static void backup_charge_cycle(struct qpnp_bms_chip *chip);
 
 static bool bms_reset;
+
+#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+extern int qpnp_is_usb_present(void);
+#endif
 
 static int qpnp_read_wrapper(struct qpnp_bms_chip *chip, u8 *val,
 			u16 base, int count)
@@ -398,6 +427,9 @@ static void enable_bms_irq(struct bms_irq *irq)
 	if (irq->ready && __test_and_clear_bit(0, &irq->disabled)) {
 		enable_irq(irq->irq);
 		pr_debug("enabled irq %d\n", irq->irq);
+		if ((irq->is_wake) &&
+				!__test_and_set_bit(0, &irq->wake_enabled))
+			enable_irq_wake(irq->irq);
 	}
 }
 
@@ -406,6 +438,9 @@ static void disable_bms_irq(struct bms_irq *irq)
 	if (irq->ready && !__test_and_set_bit(0, &irq->disabled)) {
 		disable_irq(irq->irq);
 		pr_debug("disabled irq %d\n", irq->irq);
+		if ((irq->is_wake) &&
+				__test_and_clear_bit(0, &irq->wake_enabled))
+			disable_irq_wake(irq->irq);
 	}
 }
 
@@ -414,6 +449,9 @@ static void disable_bms_irq_nosync(struct bms_irq *irq)
 	if (irq->ready && !__test_and_set_bit(0, &irq->disabled)) {
 		disable_irq_nosync(irq->irq);
 		pr_debug("disabled irq %d\n", irq->irq);
+		if ((irq->is_wake) &&
+				__test_and_clear_bit(0, &irq->wake_enabled))
+			disable_irq_wake(irq->irq);
 	}
 }
 
@@ -1126,10 +1164,15 @@ static int read_soc_params_raw(struct qpnp_bms_chip *chip,
 		chip->software_cc_uah = 0;
 		chip->software_shdw_cc_uah = 0;
 		chip->last_cc_uah = INT_MIN;
-		pr_debug("EOC Battery full ocv_reading = 0x%x\n",
+		#if ZTEMT_BMS_DEBUG
+		pr_info("EOC Battery full ocv_reading = 0x%x\n",
 				chip->ocv_reading_at_100);
+		#endif
 	} else if (chip->prev_last_good_ocv_raw != raw->last_good_ocv_raw) {
 		convert_and_store_ocv(chip, raw, batt_temp, false);
+		#if ZTEMT_BMS_DEBUG
+		pr_info("new last_good_ocv_uv=%duV\n",raw->last_good_ocv_uv);
+		#endif
 		/* forget the old cc value upon ocv */
 		chip->last_cc_uah = INT_MIN;
 	} else {
@@ -1427,8 +1470,11 @@ static int calculate_unusable_charge_uah(struct qpnp_bms_chip *chip,
 	uuc_iavg_ma = 0;
 	if (chip->iavg_num_samples != 0) {
 		for (i = 0; i < chip->iavg_num_samples; i++) {
+		#ifdef CONFIG_ZTEMT_COMM_CHARGE 
+		#else
 			pr_debug("iavg_samples_ma[%d] = %d\n", i,
 					chip->iavg_samples_ma[i]);
+		 #endif
 			uuc_iavg_ma += chip->iavg_samples_ma[i];
 		}
 
@@ -1811,6 +1857,9 @@ static int report_cc_based_soc(struct qpnp_bms_chip *chip)
 	int batt_temp;
 	int rc;
 	bool charging, charging_since_last_report;
+	#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+	int batt_uv;
+	#endif
 
 	rc = wait_event_interruptible_timeout(chip->bms_wait_queue,
 			chip->calculated_soc != -EINVAL,
@@ -1842,8 +1891,13 @@ static int report_cc_based_soc(struct qpnp_bms_chip *chip)
 	calculate_delta_time(&last_change_sec, &time_since_last_change_sec);
 
 	charging = chip->battery_status == POWER_SUPPLY_STATUS_CHARGING;
+	#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+	charging_since_last_report = charging || (chip->last_soc_unbound
+			&& chip->was_charging_at_sleep) || qpnp_is_usb_present();
+	#else
 	charging_since_last_report = charging || (chip->last_soc_unbound
 			&& chip->was_charging_at_sleep);
+	#endif 
 	/*
 	 * account for charge time - limit it to SOC_CATCHUP_SEC to
 	 * avoid overflows when charging continues for extended periods
@@ -1908,12 +1962,36 @@ static int report_cc_based_soc(struct qpnp_bms_chip *chip)
 
 		if (soc < chip->last_soc && soc != 0)
 			soc = chip->last_soc - soc_change;
+		#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+		if (soc > chip->last_soc)
+			soc = chip->last_soc + soc_change;
+		if(soc > 100)
+			soc = 100;
+		#else
 		if (soc > chip->last_soc && soc != 100)
 			soc = chip->last_soc + soc_change;
+		#endif
 	}
 
 	if (chip->last_soc != soc && !chip->last_soc_unbound)
 		chip->last_soc_change_sec = last_change_sec;
+
+	#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+	get_battery_voltage(chip,&batt_uv);
+	if(soc == 100 
+	  && chip->last_soc >= 0 && chip->last_soc < 95 
+	  && batt_uv < 4230000){
+		soc = chip->last_soc;
+		pr_info("invalid battery soc:100,report pre_soc=%d vbatt=%d\n",chip->last_soc,batt_uv);
+	}
+	if(chip->calc_origin_soc >= 100 && batt_uv > 4250000 
+		&& is_battery_full(chip) 
+		&& (soc>95 && soc<100)){
+		soc = 100;
+		pr_info("battery is full,set to soc:100\n");
+	}
+	soc = bound_soc(soc);
+	#endif
 
 	pr_debug("last_soc = %d, calculated_soc = %d, soc = %d, time since last change = %d\n",
 			chip->last_soc, chip->calculated_soc,
@@ -2359,6 +2437,16 @@ static int calculate_raw_soc(struct qpnp_bms_chip *chip,
 	soc = DIV_ROUND_CLOSEST((remaining_usable_charge_uah * 100),
 				(params->fcc_uah - params->uuc_uah));
 
+	#if ZTEMT_BMS_DEBUG
+    pr_info("soc[%d]=100*RUC[%d]/(FCC[%d]-UUC[%d]),cc=%d,ocv=%d\n",
+                soc,remaining_usable_charge_uah/1000,params->fcc_uah/1000, 
+                params->uuc_uah/1000,params->cc_uah/1000,raw->last_good_ocv_uv/1000);
+	#endif
+
+	#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+	chip->calc_origin_soc = soc;
+	#endif
+
 	if (chip->first_time_calc_soc && soc > BAD_SOC_THRESH && soc < 0) {
 		/*
 		 * first time calcualtion and the pon ocv  is too low resulting
@@ -2400,6 +2488,9 @@ static int calculate_raw_soc(struct qpnp_bms_chip *chip,
 }
 
 #define SLEEP_RECALC_INTERVAL	3
+#if defined(CONFIG_ZTEMT_COMM_CHARGE) || defined(CONFIG_ZTEMT_NX506J_CHARGE)		
+#define UPDATED_BATT_TEMP_STEP   20
+#endif
 static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 					struct raw_soc_params *raw,
 					int batt_temp)
@@ -2407,11 +2498,25 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 	struct soc_params params;
 	int soc, previous_soc, shutdown_soc, new_calculated_soc;
 	int remaining_usable_charge_uah;
-
+	#if defined(CONFIG_ZTEMT_COMM_CHARGE) || defined(CONFIG_ZTEMT_NX506J_CHARGE)		
+	static int  previous_batt_temp  = 0;
+	#endif
+	#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+	int batt_uv;
+	#endif
+	
 	calculate_soc_params(chip, raw, &params, batt_temp);
 	if (!is_battery_present(chip)) {
+		#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+		pr_info("battery gone\n");
+		if(chip->calculated_soc>= 0 && chip->calculated_soc<=100 )
+			new_calculated_soc = chip->calculated_soc;
+		else
+			new_calculated_soc = 50;
+		#else
 		pr_debug("battery gone, reporting 100\n");
 		new_calculated_soc = 100;
+		#endif
 		goto done_calculating;
 	}
 
@@ -2481,6 +2586,22 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 	}
 done_calculating:
 	mutex_lock(&chip->last_soc_mutex);
+	#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+	get_battery_voltage(chip,&batt_uv);
+	if(new_calculated_soc == 100 
+		&& chip->calculated_soc >= 0 && chip->calculated_soc < 95 
+		&& batt_uv < 4230000){
+    	new_calculated_soc = chip->calculated_soc;
+		pr_info("CALC:invalid battery soc:100,set to pre_soc=%d,vbatt=%d\n",chip->calculated_soc,batt_uv);
+	}
+
+	if(chip->calc_origin_soc >= 100 && batt_uv>4250000 
+		&& is_battery_full(chip)
+		&& (new_calculated_soc > 95 && new_calculated_soc<100)){
+		new_calculated_soc = 100;
+		pr_info("CALC:battery is full,set to soc:100\n");
+	}
+	#endif
 	previous_soc = chip->calculated_soc;
 	chip->calculated_soc = new_calculated_soc;
 	pr_debug("CC based calculated SOC = %d\n", chip->calculated_soc);
@@ -2506,8 +2627,17 @@ done_calculating:
 	mutex_unlock(&chip->last_soc_mutex);
 	wake_up_interruptible(&chip->bms_wait_queue);
 
-	if (new_calculated_soc != previous_soc && chip->bms_psy_registered) {
+	if (
+#if defined(CONFIG_ZTEMT_COMM_CHARGE) || defined(CONFIG_ZTEMT_NX506J_CHARGE)		
+		((new_calculated_soc != previous_soc)||(abs(batt_temp - previous_batt_temp)>UPDATED_BATT_TEMP_STEP))
+#else		
+		(new_calculated_soc != previous_soc)
+#endif			
+		&& chip->bms_psy_registered) {
 		power_supply_changed(&chip->bms_psy);
+#if defined(CONFIG_ZTEMT_COMM_CHARGE) || defined(CONFIG_ZTEMT_NX506J_CHARGE)		
+		previous_batt_temp = batt_temp;
+#endif
 		pr_debug("power supply changed\n");
 	} else {
 		/*
@@ -2521,6 +2651,9 @@ done_calculating:
 	get_current_time(&chip->last_recalc_time);
 	chip->first_time_calc_soc = 0;
 	chip->first_time_calc_uuc = 0;
+	#if ZTEMT_BMS_DEBUG
+	pr_info("new calculated_soc=%d\n", chip->calculated_soc);
+	#endif
 	return chip->calculated_soc;
 }
 
@@ -3325,11 +3458,11 @@ static void battery_status_check(struct qpnp_bms_chip *chip)
 		pr_debug("status = %d, shadow status = %d\n",
 				status, chip->battery_status);
 		if (status == POWER_SUPPLY_STATUS_CHARGING) {
-			pr_debug("charging started\n");
+			pr_info("charging started\n");
 			charging_began(chip);
 		} else if (chip->battery_status
 				== POWER_SUPPLY_STATUS_CHARGING) {
-			pr_debug("charging ended\n");
+			pr_info("charging ended\n");
 			charging_ended(chip);
 		}
 
@@ -3406,7 +3539,13 @@ static void battery_insertion_check(struct qpnp_bms_chip *chip)
 /* Returns capacity as a SoC percentage between 0 and 100 */
 static int get_prop_bms_capacity(struct qpnp_bms_chip *chip)
 {
+ #ifdef CONFIG_ZTEMT_COMM_CHARGE
+	int soc = report_state_of_charge(chip);
+	soc = bound_soc(soc);
+	return soc;
+#else
 	return report_state_of_charge(chip);
+#endif
 }
 
 static void qpnp_bms_external_power_changed(struct power_supply *psy)
@@ -3590,7 +3729,7 @@ static void load_shutdown_data(struct qpnp_bms_chip *chip)
 	calculated_soc = recalculate_raw_soc(chip);
 	shutdown_soc_out_of_limit = (abs(shutdown_soc - calculated_soc)
 			> chip->shutdown_soc_valid_limit);
-	pr_debug("calculated_soc = %d, valid_limit = %d\n",
+	pr_info("calculated_soc = %d, valid_limit = %d\n",
 			calculated_soc, chip->shutdown_soc_valid_limit);
 
 	/*
@@ -3607,7 +3746,7 @@ static void load_shutdown_data(struct qpnp_bms_chip *chip)
 		chip->battery_removed = true;
 		chip->shutdown_soc_invalid = true;
 		chip->shutdown_iavg_ma = MIN_IAVG_MA;
-		pr_debug("Ignoring shutdown SoC: invalid = %d, offmode = %d, out_of_limit = %d\n",
+		pr_info("Ignoring shutdown SoC: invalid = %d, offmode = %d, out_of_limit = %d\n",
 				invalid_stored_soc, offmode_battery_replaced,
 				shutdown_soc_out_of_limit);
 	} else {
@@ -3615,7 +3754,7 @@ static void load_shutdown_data(struct qpnp_bms_chip *chip)
 		chip->shutdown_soc = shutdown_soc;
 	}
 
-	pr_debug("raw_soc = %d shutdown_soc = %d shutdown_iavg = %d shutdown_soc_invalid = %d, battery_removed = %d\n",
+	pr_info("raw_soc = %d shutdown_soc = %d shutdown_iavg = %d shutdown_soc_invalid = %d, battery_removed = %d\n",
 			calculated_soc,
 			chip->shutdown_soc,
 			chip->shutdown_iavg_ma,
@@ -3671,7 +3810,15 @@ static int set_battery_data(struct qpnp_bms_chip *chip)
 	} else if (chip->batt_type == BATT_PALLADIUM) {
 		batt_data = &palladium_1500_data;
 	} else if (chip->batt_type == BATT_OEM) {
+        #if defined(CONFIG_ZTEMT_NX507_BATT_2300MAH)
+		batt_data = &ztemt_nx507_2300mAh_data;
+        #elif defined(CONFIG_ZTEMT_BATT_3000MAH)
+		batt_data = &ztemt_3000mAh_data;
+		#elif defined(CONFIG_ZTEMT_BATT_3000MAH_NX506J)
+		batt_data = &ztemt_3000mAh_data_nx506;
+		#else
 		batt_data = &oem_batt_data;
+		#endif
 	} else if (chip->batt_type == BATT_QRD_4V35_2000MAH) {
 		batt_data = &QRD_4v35_2000mAh_data;
 	} else if (chip->batt_type == BATT_QRD_4V2_1300MAH) {
@@ -3894,18 +4041,18 @@ static inline int bms_read_properties(struct qpnp_bms_chip *chip)
 		return rc;
 	}
 
-	pr_debug("dts data: r_sense_uohm:%d, v_cutoff_uv:%d, max_v:%d\n",
+	pr_info("dts data: r_sense_uohm:%d, v_cutoff_uv:%d, max_v:%d\n",
 			chip->r_sense_uohm, chip->v_cutoff_uv,
 			chip->max_voltage_uv);
-	pr_debug("r_conn:%d, shutdown_soc: %d, adjust_soc_low:%d\n",
+	pr_info("r_conn:%d, shutdown_soc: %d, adjust_soc_low:%d\n",
 			chip->r_conn_mohm, chip->shutdown_soc_valid_limit,
 			chip->adjust_soc_low_threshold);
-	pr_debug("chg_term_ua:%d, batt_type:%d\n",
+	pr_info("chg_term_ua:%d, batt_type:%d\n",
 			chip->chg_term_ua,
 			chip->batt_type);
-	pr_debug("ignore_shutdown_soc:%d, use_voltage_soc:%d\n",
+	pr_info("ignore_shutdown_soc:%d, use_voltage_soc:%d\n",
 			chip->ignore_shutdown_soc, chip->use_voltage_soc);
-	pr_debug("use external rsense: %d\n", chip->use_external_rsense);
+	pr_info("use external rsense: %d\n", chip->use_external_rsense);
 	return 0;
 }
 
@@ -3960,11 +4107,11 @@ static int bms_request_irqs(struct qpnp_bms_chip *chip)
 	int rc;
 
 	SPMI_REQUEST_IRQ(chip, rc, sw_cc_thr);
+	chip->sw_cc_thr_irq.is_wake = true;
 	disable_bms_irq(&chip->sw_cc_thr_irq);
-	enable_irq_wake(chip->sw_cc_thr_irq.irq);
 	SPMI_REQUEST_IRQ(chip, rc, ocv_thr);
+	chip->ocv_thr_irq.is_wake = true;
 	disable_bms_irq(&chip->ocv_thr_irq);
-	enable_irq_wake(chip->ocv_thr_irq.irq);
 	return 0;
 }
 
@@ -4432,7 +4579,10 @@ static int bms_suspend(struct device *dev)
 	struct qpnp_bms_chip *chip = dev_get_drvdata(dev);
 
 	cancel_delayed_work_sync(&chip->calculate_soc_delayed_work);
+	#ifdef CONFIG_ZTEMT_CHARGE_BQ24192
+	#else
 	chip->was_charging_at_sleep = is_battery_charging(chip);
+	#endif
 	return 0;
 }
 

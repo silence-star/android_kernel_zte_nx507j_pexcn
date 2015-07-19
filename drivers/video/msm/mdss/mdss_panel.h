@@ -321,10 +321,16 @@ struct mdss_panel_info {
 	u32 roi_y;
 	u32 roi_w;
 	u32 roi_h;
+	u32 bl_level;
 	int bklt_ctrl;	/* backlight ctrl */
 	int pwm_pmic_gpio;
 	int pwm_lpg_chan;
 	int pwm_period;
+	int brig_to_bl_lvl_para_a1;
+    int brig_to_bl_lvl_para_a2;
+    int brig_to_bl_lvl_para_b1;
+    int brig_to_bl_lvl_para_b2;
+    int brig_to_bl_lvl_turn_point;
 	u32 mode_gpio_state;
 	bool dynamic_fps;
 	bool ulps_feature_enabled;

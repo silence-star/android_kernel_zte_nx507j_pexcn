@@ -1779,7 +1779,12 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	if (!config)
 		return -ENOMEM;
 
+#ifdef CONFIG_ZTEMT_USB
+	/* ZTEMT: NO ums in new nubia storage solution */
+	config->fsg.nluns = 0;
+#else
 	config->fsg.nluns = 1;
+#endif
 	snprintf(name[0], MAX_LUN_NAME, "lun");
 	config->fsg.luns[0].removable = 1;
 
@@ -1790,7 +1795,12 @@ static int mass_storage_function_init(struct android_usb_function *f,
 		snprintf(name[config->fsg.nluns], MAX_LUN_NAME, "lun0");
 		config->fsg.nluns++;
 	}
+
+#ifdef CONFIG_ZTEMT_USB
+	if (dev->pdata && dev->pdata->external_ums) {
+#else
 	if (dev->pdata && dev->pdata->internal_ums) {
+#endif
 		config->fsg.luns[config->fsg.nluns].cdrom = 0;
 		config->fsg.luns[config->fsg.nluns].ro = 0;
 		config->fsg.luns[config->fsg.nluns].removable = 1;
@@ -1809,6 +1819,11 @@ static int mass_storage_function_init(struct android_usb_function *f,
 		config->fsg.luns[n].removable = 1;
 		config->fsg.nluns++;
 	}
+
+#ifdef CONFIG_ZTEMT_USB
+	config->fsg.vendor_name = "nubia";
+	config->fsg.product_name = "Android";
+#endif
 
 	common = fsg_common_init(NULL, cdev, &config->fsg);
 	if (IS_ERR(common)) {
@@ -2968,8 +2983,13 @@ static int __devinit android_probe(struct platform_device *pdev)
 				&pdata->swfi_latency);
 		pdata->cdrom = of_property_read_bool(pdev->dev.of_node,
 				"qcom,android-usb-cdrom");
+#ifdef CONFIG_ZTEMT_USB
+		pdata->external_ums = of_property_read_bool(pdev->dev.of_node,
+				"qcom,android-usb-external-ums");
+#else
 		pdata->internal_ums = of_property_read_bool(pdev->dev.of_node,
 				"qcom,android-usb-internal-ums");
+#endif
 		len = of_property_count_strings(pdev->dev.of_node,
 				"qcom,streaming-func");
 		if (len > MAX_STREAMING_FUNCS) {

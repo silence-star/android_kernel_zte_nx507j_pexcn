@@ -1704,4 +1704,7 @@ static inline struct qpnp_adc_tm_chip *qpnp_get_adc_tm(struct device *dev,
 { return ERR_PTR(-ENXIO); }
 #endif
 
+#ifdef CONFIG_ZTEMT_COMM_CHARGE
+void qpnp_notify_charger_of_the_charger_type(int i_chg_type);
+#endif
 #endif

@@ -25,6 +25,10 @@
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 #endif
 
+#if defined(CONFIG_ZTE_CAMERA_NX505J) || defined(CONFIG_ZTE_CAMERA_NX507J)|| defined(CONFIG_ZTE_CAMERA_NX504J)
+unsigned short af_infinity_value_imx214 = 0;
+unsigned short af_macro_value_imx214 = 0;
+#endif
 DEFINE_MSM_MUTEX(msm_eeprom_mutex);
 
 
@@ -131,6 +135,12 @@ static int eeprom_config_read_cal_data(struct msm_eeprom_ctrl_t *e_ctrl,
 		e_ctrl->cal_data.mapdata,
 		cdata->cfg.read_data.num_bytes);
 
+	/* should only be called once.  free kernel resource */
+	if (!rc) {
+		kfree(e_ctrl->cal_data.mapdata);
+		kfree(e_ctrl->cal_data.map);
+		memset(&e_ctrl->cal_data, 0, sizeof(e_ctrl->cal_data));
+	}
 	return rc;
 }
 
@@ -1031,6 +1041,11 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 		CDBG("memory_data[%d] = 0x%X\n", j,
 		     e_ctrl->cal_data.mapdata[j]);
 
+#if defined(CONFIG_ZTE_CAMERA_NX505J) || defined(CONFIG_ZTE_CAMERA_NX507J)|| defined(CONFIG_ZTE_CAMERA_NX504J)
+	af_infinity_value_imx214 = (e_ctrl->cal_data.mapdata[21] << 8) | e_ctrl->cal_data.mapdata[20];
+	af_macro_value_imx214 = (e_ctrl->cal_data.mapdata[19] << 8) | e_ctrl->cal_data.mapdata[18];
+	printk("jinghongliang,af_macro_value_imx214 =%d,af_infinity_value_imx214 =%d\n",af_macro_value_imx214,af_infinity_value_imx214);
+#endif
 	e_ctrl->is_supported |= msm_eeprom_match_crc(&e_ctrl->cal_data);
 
 	rc = msm_camera_power_down(power_info, e_ctrl->eeprom_device_type,

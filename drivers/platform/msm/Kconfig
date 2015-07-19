@@ -129,6 +129,11 @@ config PFT
 		The driver is tagging files when created by
 		registered application.
 		Tagged files are encrypted using the dm-req-crypt driver.
+config ZTE_POWEROFF_ALARM
+    tristate "ZTE modify for poweroff alarm"
+    default y
+	help
+	  Provides two interface node for alarm.
 
 config SSM
 	tristate "Qualcomm Secure Service Module"

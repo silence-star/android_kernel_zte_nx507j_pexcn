@@ -22,7 +22,10 @@
 #include "msm_camera_i2c.h"
 #include "msm_sd.h"
 
+#if ((defined CONFIG_ZTE_CAMERA_DUAL_LED) || (defined ZTEMT_CAMERA_DUAL_LED))
+#else
 #define MAX_LED_TRIGGERS 3
+#endif
 
 struct msm_led_flash_ctrl_t;
 

@@ -199,6 +199,44 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 
 static int lcd_backlight_registered;
 
+#ifdef CONFIG_ZTEMT_LCD_BACKLIGHT_LINEAR_CONTROL_METHOLD
+static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
+				      enum led_brightness value)
+{
+	struct msm_fb_data_type *mfd = dev_get_drvdata(led_cdev->dev->parent);
+	int bl_lvl = 0;
+
+    mfd->panel_info->bl_level = value;
+
+    if (value>0)
+    {
+    	if (value > mfd->panel_info->brightness_max)
+    		value = mfd->panel_info->brightness_max;
+
+        if (value < mfd->panel_info->brig_to_bl_lvl_turn_point)
+        {
+            bl_lvl = (mfd->panel_info->brig_to_bl_lvl_para_a1) * value + mfd->panel_info->brig_to_bl_lvl_para_b1;
+        }
+        else
+        {
+            bl_lvl = (mfd->panel_info->brig_to_bl_lvl_para_a2) * value + mfd->panel_info->brig_to_bl_lvl_para_b2;
+        }
+
+        bl_lvl = bl_lvl>0 ? bl_lvl/100 : 0;
+        bl_lvl = bl_lvl>mfd->panel_info->bl_max ? mfd->panel_info->bl_max : bl_lvl;
+    }
+
+	if (!bl_lvl && value)
+		bl_lvl = 1;
+
+	if (!IS_CALIB_MODE_BL(mfd) && (!mfd->ext_bl_ctrl || !value ||
+							!mfd->bl_level)) {
+		mutex_lock(&mfd->bl_lock);
+		mdss_fb_set_backlight(mfd, bl_lvl);
+		mutex_unlock(&mfd->bl_lock);
+	}
+}
+#else
 static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 				      enum led_brightness value)
 {
@@ -223,6 +261,7 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 		mutex_unlock(&mfd->bl_lock);
 	}
 }
+#endif
 
 static struct led_classdev backlight_led = {
 	.name           = "lcd-backlight",
@@ -882,6 +921,11 @@ static void mdss_fb_scale_bl(struct msm_fb_data_type *mfd, u32 *bl_lvl)
 	(*bl_lvl) = temp;
 }
 
+//ZTEMT: peijun added for camera control backlight -----start
+struct msm_fb_data_type *zte_camera_mfd;
+int  camera_set_backlight = 0;
+//ZTEMT: peijun added for camera control backlight -----end
+
 /* must call this function from within mfd->bl_lock */
 void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 {
@@ -891,14 +935,23 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	int ret = -EINVAL;
 	bool is_bl_changed = (bkl_lvl != mfd->bl_level);
 
-	if (((!mfd->panel_power_on && mfd->dcm_state != DCM_ENTER)
-		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) {
+	if ((((!mfd->panel_power_on && mfd->dcm_state != DCM_ENTER)
+		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) ||
+		mfd->panel_info->cont_splash_enabled){
 		mfd->unset_bl_level = bkl_lvl;
 		return;
 	} else {
 		mfd->unset_bl_level = 0;
 	}
 
+	 //ZTEMT: peijun added for camera control backlight -----start
+	 zte_camera_mfd = mfd;
+        if(camera_set_backlight==1) {
+	  pr_err("camera is setting backlight, return!!\n");
+	  return;
+        }
+	//ZTEMT: peijun added for camera control backlight -----end
+	
 	pdata = dev_get_platdata(&mfd->pdev->dev);
 
 	if ((pdata) && (pdata->set_backlight)) {
@@ -961,6 +1014,9 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 			pdata->set_backlight(pdata, temp);
 			mfd->bl_level_scaled = mfd->unset_bl_level;
 			mfd->bl_updated = 1;
+		      //ZTEMT: peijun added for camera control backlight -----start
+			zte_camera_mfd = mfd;
+		     //ZTEMT: peijun added for camera control backlight -----end
 		}
 	}
 	mutex_unlock(&mfd->bl_lock);
@@ -1074,26 +1130,6 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 	return mdss_fb_blank_sub(blank_mode, info, mfd->op_enable);
 }
 
-/* Set VM page protection */
-static inline void __mdss_fb_set_page_protection(struct vm_area_struct *vma,
-		struct msm_fb_data_type *mfd)
-{
-	if (mfd->mdp_fb_page_protection == MDP_FB_PAGE_PROTECTION_WRITECOMBINE)
-		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
-	else if (mfd->mdp_fb_page_protection ==
-			MDP_FB_PAGE_PROTECTION_WRITETHROUGHCACHE)
-		vma->vm_page_prot = pgprot_writethroughcache(vma->vm_page_prot);
-	else if (mfd->mdp_fb_page_protection ==
-			MDP_FB_PAGE_PROTECTION_WRITEBACKCACHE)
-		vma->vm_page_prot = pgprot_writebackcache(vma->vm_page_prot);
-	else if (mfd->mdp_fb_page_protection ==
-			MDP_FB_PAGE_PROTECTION_WRITEBACKWACACHE)
-		vma->vm_page_prot = pgprot_writebackwacache(vma->vm_page_prot);
-	else
-		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-
-
-}
 
 static inline int mdss_fb_create_ion_client(struct msm_fb_data_type *mfd)
 {
@@ -1277,7 +1313,10 @@ static int mdss_fb_fbmem_ion_mmap(struct fb_info *info,
 			}
 			len = min(len, remainder);
 
-			__mdss_fb_set_page_protection(vma, mfd);
+			if (mfd->mdp_fb_page_protection ==
+					MDP_FB_PAGE_PROTECTION_WRITECOMBINE)
+			vma->vm_page_prot =
+					pgprot_writecombine(vma->vm_page_prot);
 
 			pr_debug("vma=%p, addr=%x len=%ld",
 					vma, (unsigned int)addr, len);
@@ -1320,7 +1359,7 @@ static int mdss_fb_physical_mmap(struct fb_info *info,
 	unsigned long start = info->fix.smem_start;
 	u32 len = PAGE_ALIGN((start & ~PAGE_MASK) + info->fix.smem_len);
 	unsigned long off = vma->vm_pgoff << PAGE_SHIFT;
-
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	if (!start) {
 		pr_warn("No framebuffer memory is allocated\n");
 		return -ENOMEM;
@@ -1329,8 +1368,8 @@ static int mdss_fb_physical_mmap(struct fb_info *info,
 	/* Set VM flags. */
 	start &= PAGE_MASK;
 	if ((vma->vm_end <= vma->vm_start) ||
-	    (off >= len) ||
-	    ((vma->vm_end - vma->vm_start) > (len - off)))
+		(off >= len) ||
+		((vma->vm_end - vma->vm_start) > (len - off)))
 		return -EINVAL;
 	off += start;
 	if (off < start)
@@ -1338,11 +1377,13 @@ static int mdss_fb_physical_mmap(struct fb_info *info,
 	vma->vm_pgoff = off >> PAGE_SHIFT;
 	/* This is an IO map - tell maydump to skip this VMA */
 	vma->vm_flags |= VM_IO;
+	if (mfd->mdp_fb_page_protection == MDP_FB_PAGE_PROTECTION_WRITECOMBINE)
+		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 
 	/* Remap the frame buffer I/O range */
 	if (io_remap_pfn_range(vma, vma->vm_start, off >> PAGE_SHIFT,
-			       vma->vm_end - vma->vm_start,
-			       vma->vm_page_prot))
+				vma->vm_end - vma->vm_start,
+				vma->vm_page_prot))
 		return -EAGAIN;
 
 	return 0;

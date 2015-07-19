@@ -681,18 +681,23 @@ void timekeeping_inject_sleeptime(struct timespec *delta)
  */
 static void timekeeping_resume(void)
 {
-	struct timekeeper *tk = &timekeeper;
-	struct clocksource *clock = tk->clock;
+	//struct timekeeper *tk = &timekeeper;
+	//struct clocksource *clock = tk->clock;
 	unsigned long flags;
-	struct timespec ts_new, ts_delta;
-	cycle_t cycle_now, cycle_delta;
-	bool suspendtime_found = false;
+	struct timespec ts;
+	//struct timespec ts_new, ts_delta;
+	//cycle_t cycle_now, cycle_delta;
+	//bool suspendtime_found = false;
 
-	read_persistent_clock(&ts_new);
-
+	//read_persistent_clock(&ts_new);
+	read_persistent_clock(&ts);
 	clocksource_resume();
 
 	write_seqlock_irqsave(&timekeeper.lock, flags);
+
+	if (timespec_compare(&ts, &timekeeping_suspend_time) > 0) {
+                  ts = timespec_sub(ts, timekeeping_suspend_time);
+                  __timekeeping_inject_sleeptime(&ts);
 
 	/*
 	 * After system resumes, we need to calculate the suspended time and
@@ -706,42 +711,45 @@ static void timekeeping_resume(void)
 	 * The less preferred source will only be tried if there is no better
 	 * usable source. The rtc part is handled separately in rtc core code.
 	 */
-	cycle_now = clock->read(clock);
-	if ((clock->flags & CLOCK_SOURCE_SUSPEND_NONSTOP) &&
-		cycle_now > clock->cycle_last) {
-		u64 num, max = ULLONG_MAX;
-		u32 mult = clock->mult;
-		u32 shift = clock->shift;
-		s64 nsec = 0;
+	//cycle_now = clock->read(clock);
+	//if ((clock->flags & CLOCK_SOURCE_SUSPEND_NONSTOP) &&
+	//	cycle_now > clock->cycle_last) {
+	//	u64 num, max = ULLONG_MAX;
+	//	u32 mult = clock->mult;
+	//	u32 shift = clock->shift;
+	//	s64 nsec = 0;
 
-		cycle_delta = (cycle_now - clock->cycle_last) & clock->mask;
+	//	cycle_delta = (cycle_now - clock->cycle_last) & clock->mask;
 
 		/*
 		 * "cycle_delta * mutl" may cause 64 bits overflow, if the
 		 * suspended time is too long. In that case we need do the
 		 * 64 bits math carefully
 		 */
-		do_div(max, mult);
-		if (cycle_delta > max) {
-			num = div64_u64(cycle_delta, max);
-			nsec = (((u64) max * mult) >> shift) * num;
-			cycle_delta -= num * max;
-		}
-		nsec += ((u64) cycle_delta * mult) >> shift;
+	//	do_div(max, mult);
+	//	if (cycle_delta > max) {
+	//		num = div64_u64(cycle_delta, max);
+	//		nsec = (((u64) max * mult) >> shift) * num;
+	//		cycle_delta -= num * max;
+	//	}
+	//	nsec += ((u64) cycle_delta * mult) >> shift;
 
-		ts_delta = ns_to_timespec(nsec);
-		suspendtime_found = true;
-	} else if (timespec_compare(&ts_new, &timekeeping_suspend_time) > 0) {
-		ts_delta = timespec_sub(ts_new, timekeeping_suspend_time);
-		suspendtime_found = true;
+	//	ts_delta = ns_to_timespec(nsec);
+	//	suspendtime_found = true;
+	//} else if (timespec_compare(&ts_new, &timekeeping_suspend_time) > 0) {
+	//	ts_delta = timespec_sub(ts_new, timekeeping_suspend_time);
+	//	suspendtime_found = true;
 	}
 
-	if (suspendtime_found)
-		__timekeeping_inject_sleeptime(&ts_delta);
+	//if (suspendtime_found)
+	//	__timekeeping_inject_sleeptime(&ts_delta);
 
 	/* Re-base the last cycle value */
-	clock->cycle_last = cycle_now;
-	tk->ntp_error = 0;
+	//clock->cycle_last = cycle_now;
+	//tk->ntp_error = 0;
+	timekeeper.clock->cycle_last = timekeeper.clock->read(timekeeper.clock);
+	timekeeper.ntp_error = 0;
+
 	timekeeping_suspended = 0;
 	timekeeping_update(false);
 	write_sequnlock_irqrestore(&timekeeper.lock, flags);

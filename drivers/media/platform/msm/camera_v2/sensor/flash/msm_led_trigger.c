@@ -69,6 +69,40 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 		break;
 
 	case MSM_CAMERA_LED_LOW:
+		#ifdef CONFIG_ZTE_CAMERA_DUAL_LED
+        if (fctrl->torch_trigger) {
+          if(cfg->torch_current == 0) {
+				led_trigger_event(fctrl->torch_trigger, 0);
+				for (i = 0; i < fctrl->num_sources; i++)
+					if (fctrl->flash_trigger[i]) {
+						max_curr_l = fctrl->flash_max_current[i];
+					if (cfg->flash_current[i] > 0 &&
+						cfg->flash_current[i] < max_curr_l) {
+							curr_l = cfg->flash_current[i];
+						printk("#### k_debug cfg->flash_current[i]=%d\n",cfg->flash_current[i]);
+					} else {
+						curr_l = cfg->flash_current[i];
+						printk("####LED current clamped to %d\n",curr_l);
+					}
+					led_trigger_event(fctrl->flash_trigger[i],
+						curr_l);
+				}
+			} else { 
+				max_curr_l = fctrl->torch_max_current;
+                printk("####max_curr_l is %d, cfg->torch_current is %d\n", max_curr_l, cfg->torch_current);
+			  	if (cfg->torch_current > 0 &&
+			  		cfg->torch_current < max_curr_l) {
+					curr_l = cfg->torch_current;
+			  	} else {
+					curr_l = fctrl->torch_op_current;
+					pr_err("LED current clamped to %d\n",
+						curr_l);
+			  	}
+			  	led_trigger_event(fctrl->torch_trigger,
+					curr_l);
+			}
+		}
+		#else /*CONFIG_ZTE_CAMERA_DUAL_LED*/
 		if (fctrl->torch_trigger) {
 			max_curr_l = fctrl->torch_max_current;
 			if (cfg->torch_current > 0 &&
@@ -79,9 +113,9 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 				pr_err("LED current clamped to %d\n",
 					curr_l);
 			}
-			led_trigger_event(fctrl->torch_trigger,
-				curr_l);
+			led_trigger_event(fctrl->torch_trigger,	curr_l);
 		}
+		#endif /*CONFIG_ZTE_CAMERA_DUAL_LED*/
 		break;
 
 	case MSM_CAMERA_LED_HIGH:
@@ -90,16 +124,20 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 		for (i = 0; i < fctrl->num_sources; i++)
 			if (fctrl->flash_trigger[i]) {
 				max_curr_l = fctrl->flash_max_current[i];
-				if (cfg->flash_current[i] > 0 &&
-						cfg->flash_current[i] < max_curr_l) {
+				if (cfg->flash_current[i] > 0 && cfg->flash_current[i] < max_curr_l) {
 					curr_l = cfg->flash_current[i];
+					printk("#### k_debug cfg->flash_current[i]=%d\n",cfg->flash_current[i]);
+
 				} else {
+				    #ifdef CONFIG_ZTE_CAMERA_DUAL_LED
+					curr_l = cfg->flash_current[i];
+					#else
 					curr_l = fctrl->flash_op_current[i];
-					pr_err("LED current clamped to %d\n",
-						curr_l);
+					#endif
+					
+					printk(" #### LED current clamped to %d\n",	curr_l);
 				}
-				led_trigger_event(fctrl->flash_trigger[i],
-					curr_l);
+				led_trigger_event(fctrl->flash_trigger[i],curr_l);
 			}
 		break;
 
