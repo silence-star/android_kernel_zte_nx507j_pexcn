@@ -240,6 +240,7 @@ enum msm_vfe_reg_cfg_type {
 	VFE_READ_DMI_64BIT,
 	GET_SOC_HW_VER,
 	GET_MAX_CLK_RATE,
+	SET_WM_UB_SIZE,
 	//#ifdef CONFIG_ZTE_CAMERA_NX506J
 	#if 1 //ZTEMT rectangle_patch_from_zhigang
 	VFE_HW_UPDATE_LOCK,
