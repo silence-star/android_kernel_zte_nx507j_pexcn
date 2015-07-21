@@ -152,7 +152,7 @@ struct bms_irq {
 	unsigned long	disabled;
 	unsigned long	wake_enabled;
 	bool		ready;
-	bool 	is_wake;
+	bool		is_wake;
 };
 
 struct bms_wakeup_source {

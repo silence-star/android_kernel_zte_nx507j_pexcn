@@ -788,7 +788,6 @@ static int  qpnp_chg_state_machine_reset(struct qpnp_chg_chip *chip)
 		return rc;
 	}
 	return rc;
-
 }
 #endif
 
@@ -4873,8 +4872,8 @@ qpnp_chg_request_irqs(struct qpnp_chg_chip *chip)
 			qpnp_chg_irq_wake_enable(&chip->chg_failed);
 			qpnp_chg_irq_wake_enable(&chip->chg_vbatdet_lo);
 			qpnp_chg_disable_irq(&chip->chg_vbatdet_lo);
-
 			break;
+
 		case SMBB_BAT_IF_SUBTYPE:
 		case SMBBP_BAT_IF_SUBTYPE:
 		case SMBCL_BAT_IF_SUBTYPE:
