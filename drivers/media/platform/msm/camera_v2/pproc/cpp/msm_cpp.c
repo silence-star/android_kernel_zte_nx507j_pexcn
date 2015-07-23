@@ -1089,6 +1089,9 @@ static int msm_cpp_dump_frame_cmd(uint32_t *cmd, int32_t len)
 
 static void msm_cpp_do_timeout_work(struct work_struct *work)
 {
+	int ret;
+	uint32_t i = 0;
+	struct msm_cpp_frame_info_t *this_frame = NULL;
 
 	pr_err("cpp_timer_callback called. (jiffies=%lu)\n",
 		jiffies);
