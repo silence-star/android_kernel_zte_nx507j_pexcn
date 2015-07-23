@@ -594,7 +594,8 @@ void msm_cpp_do_tasklet(unsigned long data)
 			if (tx_fifo[i] == MSM_CPP_MSG_ID_CMD) {
 				cmd_len = tx_fifo[i+1];
 				msg_id = tx_fifo[i+2];
-				if (msg_id == MSM_CPP_MSG_ID_FRAME_ACK) {
+				if ((msg_id == MSM_CPP_MSG_ID_FRAME_ACK)
+					&& (atomic_read(&cpp_timer.used))) {
 					CPP_DBG("Frame done!!\n");
 					/* delete CPP timer */
 					CPP_DBG("delete timer.\n");
@@ -1088,9 +1089,6 @@ static int msm_cpp_dump_frame_cmd(uint32_t *cmd, int32_t len)
 
 static void msm_cpp_do_timeout_work(struct work_struct *work)
 {
-	int ret;
-	uint32_t i = 0;
-	struct msm_cpp_frame_info_t *this_frame = NULL;
 
 	pr_err("cpp_timer_callback called. (jiffies=%lu)\n",
 		jiffies);
@@ -1105,7 +1103,13 @@ static void msm_cpp_do_timeout_work(struct work_struct *work)
 
 	disable_irq(cpp_timer.data.cpp_dev->irq->start);
 	pr_err("Reloading firmware\n");
-	cpp_load_fw(cpp_timer.data.cpp_dev, NULL);
+	if (!atomic_read(&cpp_timer.used)) {
+		pr_err("Delayed trigger, IRQ serviced\n");
+		return;
+	}
+	atomic_set(&cpp_timer.used, 0);
+	cpp_load_fw(cpp_timer.data.cpp_dev,
+		cpp_timer.data.cpp_dev->fw_name_bin);
 	pr_err("Firmware loading done\n");
 	enable_irq(cpp_timer.data.cpp_dev->irq->start);
 	msm_camera_io_w_mb(0x8, cpp_timer.data.cpp_dev->base +
@@ -1407,8 +1411,8 @@ long msm_cpp_subdev_ioctl(struct v4l2_subdev *sd,
 		return -EINVAL;
 	}
 
-	if ((ioctl_ptr->ioctl_ptr == NULL) || (ioctl_ptr->len == 0)){
-		pr_err("ioctl_ptr OR ioctl_ptr->len is NULL  %p %d \n",
+	if ((ioctl_ptr->ioctl_ptr == NULL) || (ioctl_ptr->len == 0)) {
+		pr_err("ioctl_ptr OR ioctl_ptr->len is NULL  %p %d\n",
 			ioctl_ptr, ioctl_ptr->len);
 		return -EINVAL;
 	}
@@ -1433,7 +1437,7 @@ long msm_cpp_subdev_ioctl(struct v4l2_subdev *sd,
 				cpp_dev->fw_name_bin = NULL;
 			}
 			if (ioctl_ptr->len >= MSM_CPP_MAX_FW_NAME_LEN) {
-				pr_err("Error: ioctl_ptr->len = %d \n",
+				pr_err("Error: ioctl_ptr->len = %d\n",
 					 ioctl_ptr->len);
 				mutex_unlock(&cpp_dev->mutex);
 				return -EINVAL;
@@ -1595,31 +1599,36 @@ long msm_cpp_subdev_ioctl(struct v4l2_subdev *sd,
 		struct msm_device_queue *queue = &cpp_dev->eventData_q;
 		struct msm_queue_cmd *event_qcmd;
 		struct msm_cpp_frame_info_t *process_frame;
+
+		CPP_DBG("VIDIOC_MSM_CPP_GET_EVENTPAYLOAD\n");
 		event_qcmd = msm_dequeue(queue, list_eventdata);
-		if(event_qcmd) {
-			process_frame = event_qcmd->command;
-			CPP_DBG("fid %d\n", process_frame->frame_id);
-			if (copy_to_user((void __user *)ioctl_ptr->ioctl_ptr,
+		if (!event_qcmd) {
+			pr_err("no queue cmd available");
+			mutex_unlock(&cpp_dev->mutex);
+			return -EINVAL;
+		}
+		process_frame = event_qcmd->command;
+		CPP_DBG("fid %d\n", process_frame->frame_id);
+		if (copy_to_user((void __user *)ioctl_ptr->ioctl_ptr,
 					process_frame,
 					sizeof(struct msm_cpp_frame_info_t))) {
+						mutex_unlock(&cpp_dev->mutex);
 						kfree(process_frame->cpp_cmd_msg);
 						process_frame->cpp_cmd_msg = NULL;
 						kfree(process_frame);
 						process_frame = NULL;
 						kfree(event_qcmd);
 						event_qcmd = NULL;
-						mutex_unlock(&cpp_dev->mutex);
 						return -EINVAL;
 			}
 
 			kfree(process_frame->cpp_cmd_msg);
+			process_frame->cpp_cmd_msg = NULL;
 			kfree(process_frame);
+			process_frame = NULL;
 			kfree(event_qcmd);
-		} else {
-			pr_err("Empty command list\n");
-			return -EFAULT;
-		}
-		break;
+			event_qcmd = NULL;
+			break;
 	}
 	case MSM_SD_SHUTDOWN: {
 		mutex_unlock(&cpp_dev->mutex);
